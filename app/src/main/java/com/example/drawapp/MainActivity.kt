@@ -3,15 +3,20 @@ package com.example.drawapp
 import android.Manifest
 import android.app.Activity
 import android.app.Dialog
+import android.content.ContentValues
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.media.MediaScannerConnection
+import android.net.Uri
 import android.os.AsyncTask
+import android.os.Build
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
+import android.os.Environment
 import android.provider.MediaStore
 import android.view.View
 import android.widget.ImageButton
@@ -24,6 +29,7 @@ import kotlinx.android.synthetic.main.dialog_brush_size.*
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.io.OutputStream
 
 class MainActivity : AppCompatActivity() {
 
@@ -58,7 +64,7 @@ class MainActivity : AppCompatActivity() {
 
         imageSaveButton.setOnClickListener {
             if(isReadStorageAllowed()) {
-                BitmapAsyncTask(getBitmapFromView(drawingFrameLayout)).execute()
+                BitmapAsyncTask(getBitmapFromView(drawingFrameLayout), this).execute()
             }else {
                 requestStoragePermission()
             }
@@ -168,7 +174,7 @@ class MainActivity : AppCompatActivity() {
         return returnBitmap
     }
 
-    private inner class BitmapAsyncTask(val mBitmap: Bitmap): AsyncTask<Any, Void, String>(){
+    private inner class BitmapAsyncTask(val mBitmap: Bitmap, val context: Context): AsyncTask<Any, Void, String>(){
 
         private lateinit var  mProgressDialog: Dialog
 
@@ -180,23 +186,36 @@ class MainActivity : AppCompatActivity() {
         override fun doInBackground(vararg params: Any?): String {
             var result = ""
 
-            if (mBitmap != null) {
-                try {
-                    val bytes = ByteArrayOutputStream()
-                    mBitmap.compress(Bitmap.CompressFormat.PNG, 90, bytes)
-                    val f = File(externalCacheDir!!.absoluteFile.toString() +
-                            File.separator + "DrawingApp_" +
-                            System.currentTimeMillis()/1000 + ".png")
-
-                    val fos = FileOutputStream(f)
-                    fos.write(bytes.toByteArray())
-                    fos.close()
-                    result = f.absolutePath
-
-                } catch (e: Exception) {
-                    e.printStackTrace()
+            try {
+                val bytes = ByteArrayOutputStream()
+                val fileName = "DrawingApp_" + System.currentTimeMillis()/1000 + ".png"
+                var fos : OutputStream? = null
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    context.contentResolver?.also { resolver ->
+                        val contentValues = ContentValues().apply {
+                            put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpg")
+                            put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES)
+                        }
+                        val imageUri: Uri? =
+                            resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+                        fos = imageUri?.let { resolver.openOutputStream(it) }
+                    }
+                } else {
+                    val imagesDir =
+                        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
+                    val image = File(imagesDir, fileName)
+                    fos = FileOutputStream(image)
                 }
+                fos?.use {
+                    mBitmap.compress(Bitmap.CompressFormat.JPEG, 100, it)
+                }
+                fos?.write(bytes.toByteArray())
+                fos?.close()
+                result = fileName
 
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
 
             return result
